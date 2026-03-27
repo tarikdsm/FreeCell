@@ -1,0 +1,15 @@
+{
+  "name": "@freecell/contracts",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "format": "biome format --write src",
+    "lint": "biome check src"
+  }
+}
+

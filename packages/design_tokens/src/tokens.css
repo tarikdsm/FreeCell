@@ -1,0 +1,33 @@
+:root {
+  --fc-color-surface: #0e4f3a;
+  --fc-color-surface-elevated: #154f43;
+  --fc-color-panel: #f5f1e8;
+  --fc-color-ink: #15211a;
+  --fc-color-accent: #d8c36a;
+  --fc-color-accent-strong: #f0de90;
+  --fc-color-shadow: rgba(7, 18, 13, 0.22);
+  --fc-color-red: #b63a46;
+  --fc-color-black: #1b2732;
+  --fc-color-outline: rgba(255, 255, 255, 0.16);
+
+  --fc-space-xxs: 4px;
+  --fc-space-xs: 8px;
+  --fc-space-sm: 12px;
+  --fc-space-md: 16px;
+  --fc-space-lg: 24px;
+  --fc-space-xl: 32px;
+  --fc-space-xxl: 48px;
+
+  --fc-radius-sm: 10px;
+  --fc-radius-md: 16px;
+  --fc-radius-lg: 24px;
+  --fc-radius-pill: 999px;
+
+  --fc-motion-quick: 120ms;
+  --fc-motion-standard: 220ms;
+  --fc-motion-slow: 360ms;
+
+  --fc-card-width: 128px;
+  --fc-card-height: 180px;
+  --fc-card-fan-offset: 38px;
+}

@@ -1,0 +1,20 @@
+{
+  "name": "freecell-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "build": "node tools/scripts/run-cargo.mjs build --workspace && pnpm --filter @freecell/contracts build && pnpm --filter @freecell/design-tokens build && pnpm --filter @freecell/web build",
+    "build:web": "pnpm --filter @freecell/web build",
+    "format": "node tools/scripts/run-cargo.mjs fmt --all && pnpm -r --if-present run format",
+    "lint": "node tools/scripts/run-cargo.mjs fmt --all --check && node tools/scripts/run-cargo.mjs clippy --workspace --all-targets -- -D warnings && pnpm -r --if-present run lint",
+    "test": "node tools/scripts/run-cargo.mjs test --workspace && python -m pytest tests/engine && pnpm --filter @freecell/e2e test",
+    "test:e2e": "pnpm --filter @freecell/e2e test",
+    "test:engine": "node tools/scripts/run-cargo.mjs test --workspace && python -m pytest tests/engine",
+    "dev": "pnpm --filter @freecell/web dev",
+    "bench:engine": "node tools/scripts/run-cargo.mjs bench -p freecell_engine"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.4"
+  }
+}

@@ -1,0 +1,39 @@
+[workspace]
+members = [
+    "crates/freecell_engine",
+    "crates/freecell_wasm",
+    "crates/freecell_py",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/tarikdsm/FreeCell"
+authors = ["tarikdsm", "OpenAI Codex"]
+
+[workspace.dependencies]
+arrayvec = { version = "0.7", features = ["serde"] }
+base64 = "0.22"
+insta = { version = "1.43", features = ["json"] }
+proptest = "1.9"
+pyo3 = { version = "0.27", features = ["abi3-py39", "extension-module", "generate-import-lib"] }
+postcard = { version = "1.1", features = ["alloc"] }
+pythonize = "0.27"
+rand = { version = "0.9", default-features = false, features = ["std"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde-wasm-bindgen = "0.6"
+sha2 = "0.10"
+smallvec = { version = "1.15", features = ["serde"] }
+thiserror = "2.0"
+wasm-bindgen = "0.2"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+
+[profile.dev.package]
+insta.opt-level = 3
+similar.opt-level = 3

@@ -1,0 +1,16 @@
+{
+  "name": "@freecell/design-tokens",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./css": "./src/tokens.css"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "format": "biome format --write src",
+    "lint": "biome check src"
+  }
+}
+

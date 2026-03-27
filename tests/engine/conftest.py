@@ -10,12 +10,6 @@ WHEEL_DIR = REPO_ROOT / "target" / "python-wheels"
 
 
 def ensure_python_binding() -> None:
-    try:
-        __import__("freecell_py")
-        return
-    except ImportError:
-        pass
-
     env = os.environ.copy()
     cargo_bin = pathlib.Path.home() / ".cargo" / "bin"
     env["PATH"] = f"{cargo_bin}{os.pathsep}{env.get('PATH', '')}"

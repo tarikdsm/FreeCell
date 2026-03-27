@@ -3,6 +3,7 @@ export type Color = 'black' | 'red';
 export type DealMode = 'microsoft';
 export type AutoPlayPolicy = 'off' | 'safe' | 'max';
 export type EngineStatus = 'playing' | 'won';
+export type HintKind = 'autoPlay' | 'forced' | 'search' | 'solved' | 'unavailable';
 
 export interface CardView {
   id: number;
@@ -76,6 +77,21 @@ export interface ReplayExport {
   autoPlayPolicy: AutoPlayPolicy;
   turns: TurnRecord[];
   finalStateHash: string;
+}
+
+export interface HintOptions {
+  maxDepth: number;
+  maxNodes: number;
+}
+
+export interface HintAnalysis {
+  kind: HintKind;
+  suggested: EngineAction | null;
+  principalVariation: EngineAction[];
+  exploredNodes: number;
+  solved: boolean;
+  score: number;
+  message: string;
 }
 
 export interface StepResult {

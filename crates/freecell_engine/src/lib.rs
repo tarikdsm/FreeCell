@@ -17,7 +17,7 @@ pub use error::MoveError;
 pub use game::Game;
 pub use snapshot::{
     AutoPlayPolicy, ColumnView, EngineStatus, FoundationView, FreeCellView, GameSnapshot,
-    ReplayExport, StepResult, TurnRecord,
+    HintAnalysis, HintKind, HintOptions, ReplayExport, StepResult, TurnRecord,
 };
 pub use state::{Column, DealMode, GameState};
 
@@ -126,6 +126,40 @@ mod tests {
             let index = action.action_index.expect("legal actions should encode");
             assert_eq!(mask[index as usize], 1);
         }
+    }
+
+    #[test]
+    fn hint_returns_a_legal_action_for_seed_one() {
+        let game = Game::with_policy(1, AutoPlayPolicy::Safe);
+        let hint = game.hint();
+        let action = hint.suggested.expect("hint should suggest an action");
+
+        assert!(game.validate_action(action).is_ok());
+        assert!(!hint.principal_variation.is_empty());
+    }
+
+    #[test]
+    fn hint_detects_a_direct_winning_move() {
+        let mut state = GameState::empty();
+        state.seed = 77;
+        state.foundations = [13, 13, 13, 12];
+        state.freecells[0] = Some(card(13, Suit::Clubs));
+
+        let game = Game::from_state(state, AutoPlayPolicy::Off);
+        let hint = game.hint();
+
+        assert!(hint.solved);
+        assert_eq!(hint.kind, HintKind::AutoPlay);
+        assert_eq!(
+            hint.suggested,
+            Some(Action::new(
+                SlotRef::Freecell { index: 0 },
+                SlotRef::Foundation {
+                    index: Suit::Clubs.index()
+                },
+                1,
+            ))
+        );
     }
 
     proptest! {

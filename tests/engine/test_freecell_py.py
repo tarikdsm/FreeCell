@@ -57,6 +57,19 @@ def test_step_advances_replay_and_state_consistently() -> None:
     assert len(replay["turns"]) >= 1
 
 
+def test_hint_returns_a_serializable_suggestion() -> None:
+    _, FreecellEnv = load_binding()
+    env = FreecellEnv(seed=1, auto_play_policy="safe")
+
+    hint = env.hint()
+
+    assert hint["kind"] in {"autoPlay", "forced", "search", "solved", "unavailable"}
+    assert hint["message"]
+    if hint["suggested"] is not None:
+        assert hint["principalVariation"]
+        assert hint["suggested"]["count"] >= 1
+
+
 def test_invalid_action_index_raises_value_error() -> None:
     ACTION_SPACE_SIZE, FreecellEnv = load_binding()
     env = FreecellEnv(seed=1)

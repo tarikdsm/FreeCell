@@ -1,4 +1,4 @@
-use freecell_engine::{Action, AutoPlayPolicy, Game, decode_action};
+use freecell_engine::{Action, AutoPlayPolicy, Game, HintOptions, decode_action};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -40,6 +40,19 @@ impl WasmGame {
     #[wasm_bindgen(js_name = legalActionMask)]
     pub fn legal_action_mask(&self) -> Vec<u8> {
         self.inner.legal_action_mask()
+    }
+
+    pub fn hint(&self) -> Result<JsValue, JsValue> {
+        serde_wasm_bindgen::to_value(&self.inner.hint()).map_err(to_js_error)
+    }
+
+    #[wasm_bindgen(js_name = hintWithOptions)]
+    pub fn hint_with_options(&self, max_depth: u8, max_nodes: u32) -> Result<JsValue, JsValue> {
+        serde_wasm_bindgen::to_value(&self.inner.hint_with_options(HintOptions {
+            max_depth,
+            max_nodes,
+        }))
+        .map_err(to_js_error)
     }
 
     pub fn step(&mut self, action_index: u16) -> Result<JsValue, JsValue> {

@@ -1,4 +1,6 @@
-use freecell_engine::{ACTION_SPACE_SIZE, AutoPlayPolicy, FreecellEnvironment, decode_action};
+use freecell_engine::{
+    ACTION_SPACE_SIZE, AutoPlayPolicy, FreecellEnvironment, HintOptions, decode_action,
+};
 use pyo3::{exceptions::PyValueError, prelude::*};
 use pythonize::pythonize;
 
@@ -31,6 +33,18 @@ impl PyFreecellEnv {
 
     fn legal_action_mask(&self) -> Vec<u8> {
         self.inner.legal_action_mask()
+    }
+
+    #[pyo3(signature = (max_depth=12, max_nodes=2500))]
+    fn hint<'py>(&self, py: Python<'py>, max_depth: u8, max_nodes: u32) -> PyResult<Py<PyAny>> {
+        Ok(pythonize(
+            py,
+            &self.inner.hint(HintOptions {
+                max_depth,
+                max_nodes,
+            }),
+        )
+        .map(|value| value.unbind())?)
     }
 
     fn step<'py>(&mut self, py: Python<'py>, action: u16) -> PyResult<Py<PyAny>> {

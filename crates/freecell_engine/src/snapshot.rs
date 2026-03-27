@@ -96,3 +96,41 @@ pub struct StepResult {
     pub state: GameSnapshot,
     pub illegal_reason: Option<String>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HintKind {
+    AutoPlay,
+    Forced,
+    Search,
+    Solved,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HintOptions {
+    pub max_depth: u8,
+    pub max_nodes: u32,
+}
+
+impl Default for HintOptions {
+    fn default() -> Self {
+        Self {
+            max_depth: 12,
+            max_nodes: 2_500,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HintAnalysis {
+    pub kind: HintKind,
+    pub suggested: Option<Action>,
+    pub principal_variation: Vec<Action>,
+    pub explored_nodes: u32,
+    pub solved: bool,
+    pub score: i32,
+    pub message: String,
+}

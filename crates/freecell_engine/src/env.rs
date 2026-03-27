@@ -1,4 +1,6 @@
-use crate::{Action, AutoPlayPolicy, Game, GameSnapshot, ReplayExport, StepResult};
+use crate::{
+    Action, AutoPlayPolicy, Game, GameSnapshot, HintAnalysis, HintOptions, ReplayExport, StepResult,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct RewardConfig {
@@ -54,6 +56,10 @@ impl FreecellEnvironment {
 
     pub fn legal_action_mask(&self) -> Vec<u8> {
         self.game.legal_action_mask()
+    }
+
+    pub fn hint(&self, options: HintOptions) -> HintAnalysis {
+        self.game.hint_with_options(options)
     }
 
     pub fn step(&mut self, action: Action) -> StepResult {

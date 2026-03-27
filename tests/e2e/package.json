@@ -1,0 +1,14 @@
+{
+  "name": "@freecell/e2e",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "lint": "biome check specs playwright.config.ts",
+    "format": "biome format --write specs playwright.config.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0"
+  }
+}

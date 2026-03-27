@@ -4,7 +4,7 @@ export default defineConfig({
   testDir: './specs',
   fullyParallel: false,
   retries: 0,
-  timeout: 90_000,
+  timeout: 120_000,
   workers: 1,
   use: {
     baseURL: 'http://127.0.0.1:4173',
@@ -14,7 +14,7 @@ export default defineConfig({
     command: 'pnpm --filter @freecell/web dev -- --host 127.0.0.1 --port 4173',
     port: 4173,
     reuseExistingServer: true,
-    timeout: 180_000,
+    timeout: 240_000,
   },
   projects: [
     {
@@ -28,6 +28,18 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 820, height: 1180 },
+      },
+    },
+    {
+      name: 'webkit-desktop',
+      use: {
+        ...devices['Desktop Safari'],
+      },
+    },
+    {
+      name: 'webkit-tablet',
+      use: {
+        ...devices['iPad Pro 11'],
       },
     },
   ],

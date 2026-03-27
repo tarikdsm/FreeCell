@@ -61,6 +61,7 @@ root.innerHTML = `
         <div class="hud-group hud-group--actions">
           <button id="undo-button" type="button">Undo</button>
           <button id="redo-button" type="button">Redo</button>
+          <button id="hint-button" type="button">Hint</button>
           <button id="auto-play-button" type="button">Auto-play</button>
           <button id="restart-button" type="button">Restart</button>
           <button id="new-game-button" type="button" class="button-accent">New Game</button>
@@ -86,6 +87,7 @@ const shell = new FreecellShell({
   status: queryRequired<HTMLElement>('#status'),
   undoButton: queryRequired<HTMLButtonElement>('#undo-button'),
   redoButton: queryRequired<HTMLButtonElement>('#redo-button'),
+  hintButton: queryRequired<HTMLButtonElement>('#hint-button'),
   autoPlayButton: queryRequired<HTMLButtonElement>('#auto-play-button'),
   newGameButton: queryRequired<HTMLButtonElement>('#new-game-button'),
   restartButton: queryRequired<HTMLButtonElement>('#restart-button'),

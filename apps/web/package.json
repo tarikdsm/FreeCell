@@ -9,8 +9,8 @@
     "prebuild": "pnpm wasm:build",
     "build": "tsc -p tsconfig.json && vite build",
     "preview": "vite preview",
-    "lint": "biome check src/main.ts src/game.ts src/style.css index.html vite.config.ts",
-    "format": "biome format --write src/main.ts src/game.ts src/style.css index.html vite.config.ts",
+    "lint": "biome check src/audio.ts src/game.ts src/main.ts src/style.css index.html vite.config.ts",
+    "format": "biome format --write src/audio.ts src/game.ts src/main.ts src/style.css index.html vite.config.ts",
     "wasm:build": "node ../../tools/scripts/run-wasm-pack.mjs build ../../crates/freecell_wasm --target web --out-dir ../../apps/web/src/wasm/freecell_wasm --out-name freecell_wasm"
   },
   "dependencies": {

@@ -1,12 +1,13 @@
 import type {
   EngineAction,
   GameSnapshot,
+  HintAnalysis,
   SlotRef,
-  StepResult,
   TurnRecord,
 } from '@freecell/contracts';
 import { tokens } from '@freecell/design-tokens';
 import { Application, Container, type FederatedPointerEvent, Graphics, Text } from 'pixi.js';
+import { AudioDirector } from './audio';
 import initFreecellWasm, { WasmGame } from './wasm/freecell_wasm/freecell_wasm';
 
 type UiElements = {
@@ -18,15 +19,44 @@ type UiElements = {
   status: HTMLElement;
   undoButton: HTMLButtonElement;
   redoButton: HTMLButtonElement;
+  hintButton: HTMLButtonElement;
   autoPlayButton: HTMLButtonElement;
   newGameButton: HTMLButtonElement;
   restartButton: HTMLButtonElement;
 };
 
-type TableauSelection = {
+type DragSelection = {
   source: SlotRef;
   count: number;
   cardIds: Set<number>;
+  anchorCardId: number;
+};
+
+type PointerPoint = {
+  x: number;
+  y: number;
+  pointerId: number;
+};
+
+type DragSession = {
+  selection: DragSelection;
+  anchorCardId: number;
+  startX: number;
+  startY: number;
+  pointerX: number;
+  pointerY: number;
+  offsetX: number;
+  offsetY: number;
+  dragDistance: number;
+  pickupPlayed: boolean;
+  hoverSlot: SlotRef | null;
+  hoverLegal: boolean;
+};
+
+type HintOverlayState = {
+  analysis: HintAnalysis;
+  cardIds: Set<number>;
+  destination: SlotRef | null;
 };
 
 type CardDescriptor = {
@@ -46,8 +76,31 @@ type SlotDescriptor = {
   y: number;
   width: number;
   height: number;
+  hitHeight: number;
   label: string;
   occupied: boolean;
+};
+
+type SlotEmphasis = {
+  slot: SlotRef;
+  tone: 'drag' | 'hint';
+  legal: boolean;
+};
+
+type DragPreview = {
+  cardIds: Set<number>;
+  anchorCardId: number;
+  x: number;
+  y: number;
+  offsetX: number;
+  offsetY: number;
+  engaged: boolean;
+};
+
+type BoardOverlay = {
+  highlightedCardIds: Set<number>;
+  slotEmphasis: SlotEmphasis | null;
+  dragPreview: DragPreview | null;
 };
 
 type SlotVisual = {
@@ -70,79 +123,7 @@ type BoardLayout = {
 
 type WasmGameApi = InstanceType<typeof WasmGame>;
 
-class AudioDirector {
-  private context: AudioContext | null = null;
-
-  unlock(): void {
-    const AudioContextClass =
-      window.AudioContext ??
-      (
-        window as typeof window & {
-          webkitAudioContext?: typeof AudioContext;
-        }
-      ).webkitAudioContext;
-
-    if (!AudioContextClass) {
-      return;
-    }
-
-    if (!this.context) {
-      this.context = new AudioContextClass();
-    }
-
-    if (this.context.state === 'suspended') {
-      void this.context.resume();
-    }
-  }
-
-  playMove(turn: TurnRecord | null, terminal: boolean): void {
-    if (!this.context) {
-      return;
-    }
-
-    if (terminal) {
-      this.playChord([523.25, 659.25, 783.99], 0.18);
-      return;
-    }
-
-    if (turn && turn.foundationDelta > 0) {
-      this.playTone(493.88, 0.08, 0.018);
-      return;
-    }
-
-    this.playTone(392.0, 0.055, 0.012);
-  }
-
-  private playTone(frequency: number, duration: number, gainValue: number): void {
-    if (!this.context) {
-      return;
-    }
-
-    const oscillator = this.context.createOscillator();
-    const gain = this.context.createGain();
-    const now = this.context.currentTime;
-
-    oscillator.type = 'triangle';
-    oscillator.frequency.setValueAtTime(frequency, now);
-
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(gainValue, now + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-
-    oscillator.connect(gain);
-    gain.connect(this.context.destination);
-    oscillator.start(now);
-    oscillator.stop(now + duration);
-  }
-
-  private playChord(frequencies: number[], duration: number): void {
-    frequencies.forEach((frequency, index) => {
-      window.setTimeout(() => {
-        this.playTone(frequency, duration, 0.02);
-      }, index * 48);
-    });
-  }
-}
+const DRAG_THRESHOLD = 12;
 
 class CardVisual {
   public readonly container = new Container();
@@ -158,19 +139,22 @@ class CardVisual {
 
   private targetX = 0;
   private targetY = 0;
-  private currentScale = 1;
   private targetScale = 1;
+  private currentScale = 1;
+  private targetRotation = 0;
+  private currentRotation = 0;
+  private dragging = false;
   private width = 0;
   private height = 0;
-  private onTap: () => void;
+  private onPress: (event: FederatedPointerEvent) => void;
 
-  constructor(onTap: () => void) {
-    this.onTap = onTap;
+  constructor(onPress: (event: FederatedPointerEvent) => void) {
+    this.onPress = onPress;
     this.container.eventMode = 'static';
-    this.container.cursor = 'pointer';
-    this.container.on('pointertap', (event: FederatedPointerEvent) => {
+    this.container.cursor = 'grab';
+    this.container.on('pointerdown', (event: FederatedPointerEvent) => {
       event.stopPropagation();
-      this.onTap();
+      this.onPress(event);
     });
 
     this.body.addChild(this.bodyBase, this.bodySheen);
@@ -184,8 +168,8 @@ class CardVisual {
     );
   }
 
-  setTapHandler(onTap: () => void): void {
-    this.onTap = onTap;
+  setPressHandler(onPress: (event: FederatedPointerEvent) => void): void {
+    this.onPress = onPress;
   }
 
   setCard(label: string, isRed: boolean, width: number, height: number): void {
@@ -224,36 +208,54 @@ class CardVisual {
     this.suitCenter.position.set(width * 0.5, height * 0.56);
   }
 
-  setSelected(selected: boolean): void {
-    this.targetScale = selected ? 1.03 : 1;
+  setFocusState(highlighted: boolean, dragging: boolean): void {
+    this.dragging = dragging;
+    this.targetScale = dragging ? 1.045 : highlighted ? 1.018 : 1;
+    this.shadow.alpha = dragging ? 1.3 : highlighted ? 1.1 : 1;
+    this.container.cursor = dragging ? 'grabbing' : 'grab';
     this.highlight.clear();
 
-    if (!selected) {
+    if (dragging) {
+      this.highlight
+        .roundRect(-2, -2, this.width + 4, this.height + 4, 22)
+        .stroke({ width: 3, color: 0x8ce0b3, alpha: 0.98 });
       return;
     }
 
-    this.highlight
-      .roundRect(0, 0, this.width, this.height, 20)
-      .stroke({ width: 3, color: 0xf0de90, alpha: 0.95 });
+    if (highlighted) {
+      this.highlight
+        .roundRect(-1, -1, this.width + 2, this.height + 2, 21)
+        .stroke({ width: 3, color: 0xf0de90, alpha: 0.92 });
+    }
   }
 
   setPose(x: number, y: number, zIndex: number): void {
     this.targetX = x;
     this.targetY = y;
+    this.targetRotation = this.dragging
+      ? Math.max(-0.03, Math.min(0.03, (x - this.container.x) * 0.0012))
+      : 0;
     this.container.zIndex = zIndex;
   }
 
   snapToPose(): void {
     this.container.position.set(this.targetX, this.targetY);
     this.currentScale = this.targetScale;
+    this.currentRotation = this.targetRotation;
     this.container.scale.set(this.currentScale);
+    this.container.rotation = this.currentRotation;
   }
 
   tick(): void {
-    this.container.x += (this.targetX - this.container.x) * 0.24;
-    this.container.y += (this.targetY - this.container.y) * 0.24;
-    this.currentScale += (this.targetScale - this.currentScale) * 0.18;
+    const positionEase = this.dragging ? 0.42 : 0.24;
+    const scaleEase = this.dragging ? 0.24 : 0.18;
+
+    this.container.x += (this.targetX - this.container.x) * positionEase;
+    this.container.y += (this.targetY - this.container.y) * positionEase;
+    this.currentScale += (this.targetScale - this.currentScale) * scaleEase;
+    this.currentRotation += (this.targetRotation - this.currentRotation) * 0.2;
     this.container.scale.set(this.currentScale);
+    this.container.rotation = this.currentRotation;
   }
 
   destroy(): void {
@@ -280,28 +282,57 @@ class CardVisual {
 }
 
 class BoardRenderer {
-  private readonly pixi = new Application();
+  private pixi = new Application();
   private readonly board = new Container();
   private readonly slotsLayer = new Container();
   private readonly cardsLayer = new Container();
   private readonly cardViews = new Map<number, CardVisual>();
   private readonly slotViews = new Map<string, SlotVisual>();
+  private readonly slotBounds = new Map<string, SlotDescriptor>();
+  private readonly cardDescriptors = new Map<number, CardDescriptor>();
 
-  private selection: TableauSelection | null = null;
+  private initialized = false;
+  private overlay: BoardOverlay = {
+    highlightedCardIds: new Set<number>(),
+    slotEmphasis: null,
+    dragPreview: null,
+  };
+  private activePointerId: number | null = null;
 
   constructor(
     private readonly host: HTMLElement,
-    private readonly onCardTap: (slot: SlotRef, row: number, cardId: number) => void,
-    private readonly onSlotTap: (slot: SlotRef) => void,
+    private readonly onCardPress: (
+      slot: SlotRef,
+      row: number,
+      cardId: number,
+      point: PointerPoint,
+    ) => void,
+    private readonly onPointerMove: (point: PointerPoint) => void,
+    private readonly onPointerRelease: (point: PointerPoint, canceled: boolean) => void,
   ) {}
 
   async init(): Promise<void> {
-    await this.pixi.init({
+    if (this.initialized) {
+      return;
+    }
+
+    const initOptions = {
       antialias: true,
       autoDensity: true,
       backgroundAlpha: 0,
       resizeTo: this.host,
-    });
+    } as const;
+
+    try {
+      await this.pixi.init(initOptions);
+    } catch (error) {
+      console.warn('Falling back to the Pixi canvas renderer for this environment.', error);
+      this.pixi = new Application();
+      await this.pixi.init({
+        ...initOptions,
+        preference: 'canvas',
+      });
+    }
 
     const canvas = this.pixi.canvas as HTMLCanvasElement;
     canvas.style.width = '100%';
@@ -314,10 +345,11 @@ class BoardRenderer {
     this.board.addChild(this.slotsLayer, this.cardsLayer);
     this.pixi.stage.addChild(this.board);
     this.pixi.ticker.add(() => this.tick());
+    this.initialized = true;
   }
 
-  render(snapshot: GameSnapshot, selection: TableauSelection | null): void {
-    this.selection = selection;
+  render(snapshot: GameSnapshot, overlay: BoardOverlay): void {
+    this.overlay = overlay;
     const layout = this.computeLayout(snapshot);
 
     this.drawSlots(snapshot, layout);
@@ -333,9 +365,74 @@ class BoardRenderer {
     this.host.dataset.engineReady = 'true';
   }
 
+  getCardPose(cardId: number): { x: number; y: number } | null {
+    const descriptor = this.cardDescriptors.get(cardId);
+
+    if (!descriptor) {
+      return null;
+    }
+
+    return { x: descriptor.x, y: descriptor.y };
+  }
+
+  slotAtPoint(x: number, y: number): SlotRef | null {
+    for (const descriptor of this.slotBounds.values()) {
+      const withinX = x >= descriptor.x && x <= descriptor.x + descriptor.width;
+      const withinY = y >= descriptor.y && y <= descriptor.y + descriptor.hitHeight;
+
+      if (withinX && withinY) {
+        return descriptor.slot;
+      }
+    }
+
+    return null;
+  }
+
+  getDebugState(): {
+    cards: Record<string, { x: number; y: number; row: number; slot: SlotRef }>;
+    slots: Record<
+      string,
+      { x: number; y: number; width: number; height: number; hitHeight: number }
+    >;
+  } {
+    return {
+      cards: Object.fromEntries(
+        Array.from(this.cardDescriptors.entries(), ([cardId, descriptor]) => [
+          cardId.toString(),
+          {
+            x: descriptor.x,
+            y: descriptor.y,
+            row: descriptor.row,
+            slot: descriptor.slot,
+          },
+        ]),
+      ),
+      slots: Object.fromEntries(
+        Array.from(this.slotBounds.entries(), ([key, descriptor]) => [
+          key,
+          {
+            x: descriptor.x,
+            y: descriptor.y,
+            width: descriptor.width,
+            height: descriptor.height,
+            hitHeight: descriptor.hitHeight,
+          },
+        ]),
+      ),
+    };
+  }
+
+  destroy(): void {
+    this.releasePointerCapture();
+    if (this.initialized) {
+      this.pixi.destroy(true, { children: true });
+      this.initialized = false;
+    }
+  }
+
   private computeLayout(snapshot: GameSnapshot): BoardLayout {
     const width = Math.max(this.host.clientWidth, 360);
-    const height = Math.max(this.host.clientHeight, 720);
+    const height = Math.max(this.host.clientHeight, 460);
     const padding = Math.max(20, Math.round(width * 0.024));
     const gap = Math.max(12, Math.round(width * 0.014));
     const cardWidth = Math.min(132, Math.max(74, (width - padding * 2 - gap * 7) / 8));
@@ -369,6 +466,7 @@ class BoardRenderer {
         y: layout.topRowY,
         width: layout.cardWidth,
         height: layout.cardHeight,
+        hitHeight: layout.cardHeight,
         label: ['FREE 1', 'FREE 2', 'FREE 3', 'FREE 4'][index] ?? `FREE ${index + 1}`,
         occupied: Boolean(slot.card),
       });
@@ -383,6 +481,7 @@ class BoardRenderer {
         y: layout.topRowY,
         width: layout.cardWidth,
         height: layout.cardHeight,
+        hitHeight: layout.cardHeight,
         label: slot.suit.toUpperCase(),
         occupied: Boolean(slot.topCard),
       });
@@ -395,36 +494,70 @@ class BoardRenderer {
         y: layout.tableauY,
         width: layout.cardWidth,
         height: layout.cardHeight,
+        hitHeight: layout.height - layout.tableauY - layout.padding,
         label: `COLUMN ${index + 1}`,
         occupied: column.cards.length > 0,
       });
     });
 
+    this.slotBounds.clear();
     const seen = new Set<string>();
 
     for (const descriptor of descriptors) {
-      const key = this.slotKey(descriptor.slot);
+      const key = slotKey(descriptor.slot);
       seen.add(key);
-      const slotVisual = this.slotViews.get(key) ?? this.createSlotVisual(descriptor.slot);
+      this.slotBounds.set(key, descriptor);
+      const slotVisual = this.slotViews.get(key) ?? this.createSlotVisual();
 
       if (!this.slotViews.has(key)) {
         this.slotViews.set(key, slotVisual);
         this.slotsLayer.addChild(slotVisual.container);
       }
 
+      const emphasized =
+        this.overlay.slotEmphasis && sameSlot(this.overlay.slotEmphasis.slot, descriptor.slot)
+          ? this.overlay.slotEmphasis
+          : null;
+
       slotVisual.container.position.set(descriptor.x, descriptor.y);
       slotVisual.background.clear();
+
+      let fillColor = descriptor.occupied ? 0x1a5e46 : 0x0d4232;
+      let fillAlpha = descriptor.occupied ? 0.18 : 0.14;
+      let strokeColor = 0xf0de90;
+      let strokeAlpha = descriptor.occupied ? 0.28 : 0.16;
+      let strokeWidth = 2;
+
+      if (emphasized) {
+        if (emphasized.tone === 'hint') {
+          fillColor = 0x4a6342;
+          fillAlpha = 0.26;
+          strokeColor = 0xf0de90;
+          strokeAlpha = 0.92;
+          strokeWidth = 3;
+        } else if (emphasized.legal) {
+          fillColor = 0x1f6e57;
+          fillAlpha = 0.26;
+          strokeColor = 0x8ce0b3;
+          strokeAlpha = 0.96;
+          strokeWidth = 3;
+        } else {
+          fillColor = 0x6a2833;
+          fillAlpha = 0.22;
+          strokeColor = 0xf48686;
+          strokeAlpha = 0.9;
+          strokeWidth = 3;
+        }
+      }
+
       slotVisual.background
         .roundRect(0, 0, descriptor.width, descriptor.height, 20)
-        .fill({
-          color: descriptor.occupied ? 0x1a5e46 : 0x0d4232,
-          alpha: descriptor.occupied ? 0.18 : 0.14,
-        })
-        .stroke({ width: 2, color: 0xf0de90, alpha: descriptor.occupied ? 0.28 : 0.16 });
+        .fill({ color: fillColor, alpha: fillAlpha })
+        .stroke({ width: strokeWidth, color: strokeColor, alpha: strokeAlpha });
 
       slotVisual.label.text = descriptor.label;
       slotVisual.label.style = {
-        fill: 0xf5f1e8,
+        fill: emphasized && emphasized.tone === 'drag' && emphasized.legal ? 0xe9fff4 : 0xf5f1e8,
         fontFamily: 'Aptos, "Segoe UI Variable Text", "Trebuchet MS", sans-serif',
         fontSize: Math.max(13, Math.round(descriptor.width * 0.12)),
         fontWeight: '600',
@@ -448,6 +581,7 @@ class BoardRenderer {
       if (!slot.card) {
         return;
       }
+
       descriptors.set(slot.card.id, {
         cardId: slot.card.id,
         shortLabel: slot.card.shortLabel,
@@ -464,6 +598,7 @@ class BoardRenderer {
       if (!slot.topCard) {
         return;
       }
+
       const foundationStart =
         layout.width - layout.padding - (layout.cardWidth + layout.gap) * 4 + layout.gap;
       descriptors.set(slot.topCard.id, {
@@ -493,27 +628,50 @@ class BoardRenderer {
       });
     });
 
-    const selectedIds = this.selection?.cardIds ?? new Set<number>();
+    this.cardDescriptors.clear();
+    descriptors.forEach((descriptor, cardId) => {
+      this.cardDescriptors.set(cardId, descriptor);
+    });
+
+    const highlightedIds = this.overlay.highlightedCardIds;
+    const dragPreview = this.overlay.dragPreview;
+    const dragAnchor = dragPreview ? descriptors.get(dragPreview.anchorCardId) : null;
 
     for (const descriptor of descriptors.values()) {
       const view =
         this.cardViews.get(descriptor.cardId) ??
-        new CardVisual(() => this.onCardTap(descriptor.slot, descriptor.row, descriptor.cardId));
+        new CardVisual((event) => this.handleCardPointerDown(event, descriptor));
 
       if (!this.cardViews.has(descriptor.cardId)) {
         this.cardViews.set(descriptor.cardId, view);
         this.cardsLayer.addChild(view.container);
       }
 
-      view.setTapHandler(() => this.onCardTap(descriptor.slot, descriptor.row, descriptor.cardId));
+      view.setPressHandler((event) => this.handleCardPointerDown(event, descriptor));
       view.setCard(
         descriptor.shortLabel,
         descriptor.color === 'red',
         layout.cardWidth,
         layout.cardHeight,
       );
-      view.setSelected(selectedIds.has(descriptor.cardId));
-      view.setPose(descriptor.x, descriptor.y, descriptor.zIndex);
+
+      const isDragged = dragPreview?.cardIds.has(descriptor.cardId) ?? false;
+      view.setFocusState(
+        highlightedIds.has(descriptor.cardId),
+        isDragged && !!dragPreview?.engaged,
+      );
+
+      if (isDragged && dragPreview && dragAnchor) {
+        const deltaX = descriptor.x - dragAnchor.x;
+        const deltaY = descriptor.y - dragAnchor.y;
+        view.setPose(
+          dragPreview.x - dragPreview.offsetX + deltaX,
+          dragPreview.y - dragPreview.offsetY + deltaY,
+          10_000 + descriptor.row,
+        );
+      } else {
+        view.setPose(descriptor.x, descriptor.y, descriptor.zIndex);
+      }
 
       if (view.container.x === 0 && view.container.y === 0) {
         view.snapToPose();
@@ -536,24 +694,80 @@ class BoardRenderer {
     }
   }
 
-  private slotKey(slot: SlotRef): string {
-    return `${slot.kind}:${slot.index}`;
-  }
-
-  private createSlotVisual(slot: SlotRef): SlotVisual {
+  private createSlotVisual(): SlotVisual {
     const container = new Container();
     const background = new Graphics();
     const label = new Text();
 
-    container.eventMode = 'static';
-    container.cursor = 'pointer';
-    container.on('pointertap', (event: FederatedPointerEvent) => {
-      event.stopPropagation();
-      this.onSlotTap(slot);
-    });
     container.addChild(background, label);
 
     return { container, background, label };
+  }
+
+  private handleCardPointerDown(event: FederatedPointerEvent, descriptor: CardDescriptor): void {
+    this.capturePointer(event.pointerId);
+    this.onCardPress(descriptor.slot, descriptor.row, descriptor.cardId, {
+      x: event.global.x,
+      y: event.global.y,
+      pointerId: event.pointerId,
+    });
+  }
+
+  private capturePointer(pointerId: number): void {
+    this.releasePointerCapture();
+    this.activePointerId = pointerId;
+    window.addEventListener('pointermove', this.handleWindowPointerMove);
+    window.addEventListener('pointerup', this.handleWindowPointerUp);
+    window.addEventListener('pointercancel', this.handleWindowPointerCancel);
+  }
+
+  private releasePointerCapture(): void {
+    if (this.activePointerId === null) {
+      return;
+    }
+
+    window.removeEventListener('pointermove', this.handleWindowPointerMove);
+    window.removeEventListener('pointerup', this.handleWindowPointerUp);
+    window.removeEventListener('pointercancel', this.handleWindowPointerCancel);
+    this.activePointerId = null;
+  }
+
+  private readonly handleWindowPointerMove = (event: PointerEvent): void => {
+    if (event.pointerId !== this.activePointerId) {
+      return;
+    }
+
+    this.onPointerMove(this.toLocalPoint(event));
+  };
+
+  private readonly handleWindowPointerUp = (event: PointerEvent): void => {
+    if (event.pointerId !== this.activePointerId) {
+      return;
+    }
+
+    const point = this.toLocalPoint(event);
+    this.releasePointerCapture();
+    this.onPointerRelease(point, false);
+  };
+
+  private readonly handleWindowPointerCancel = (event: PointerEvent): void => {
+    if (event.pointerId !== this.activePointerId) {
+      return;
+    }
+
+    const point = this.toLocalPoint(event);
+    this.releasePointerCapture();
+    this.onPointerRelease(point, true);
+  };
+
+  private toLocalPoint(event: PointerEvent): PointerPoint {
+    const rect = this.host.getBoundingClientRect();
+
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+      pointerId: event.pointerId,
+    };
   }
 }
 
@@ -583,8 +797,12 @@ class EngineBridge {
     return this.wasmGame.legalActions() as EngineAction[];
   }
 
-  stepAction(action: EngineAction): StepResult {
-    return this.wasmGame.stepAction(action) as StepResult;
+  hint(): HintAnalysis {
+    return this.wasmGame.hint() as HintAnalysis;
+  }
+
+  stepAction(action: EngineAction) {
+    return this.wasmGame.stepAction(action);
   }
 
   runAutoPlay(): TurnRecord | null {
@@ -616,27 +834,36 @@ export class FreecellShell {
   private readonly engine = new EngineBridge();
   private readonly audio = new AudioDirector();
   private readonly renderer: BoardRenderer;
+
   private snapshot!: GameSnapshot;
-  private selection: TableauSelection | null = null;
   private startedAt = performance.now();
   private timerHandle: number | null = null;
   private currentSeed = 1;
   private isReady = false;
+  private dragSession: DragSession | null = null;
+  private hintOverlay: HintOverlayState | null = null;
+  private legalActionKeys = new Set<string>();
 
   constructor(private readonly elements: UiElements) {
     this.renderer = new BoardRenderer(
       elements.stageHost,
-      (slot, row, cardId) => this.handleCardTap(slot, row, cardId),
-      (slot) => this.handleSlotTap(slot),
+      (slot, row, cardId, point) => this.handleCardPress(slot, row, cardId, point),
+      (point) => this.handlePointerMove(point),
+      (point, canceled) => this.handlePointerRelease(point, canceled),
     );
 
     this.elements.stageHost.dataset.engineReady = 'false';
     this.elements.stageHost.dataset.cardCount = '0';
     this.elements.stageHost.dataset.engineStatus = 'loading';
+    this.elements.stageHost.dataset.dragMode = 'stack';
+    this.elements.stageHost.dataset.dragActive = 'false';
+    this.elements.stageHost.dataset.hoverSlot = 'none';
+    this.elements.stageHost.dataset.hintKind = 'none';
     this.setControlsDisabled(true);
 
     elements.undoButton.addEventListener('click', () => this.undo());
     elements.redoButton.addEventListener('click', () => this.redo());
+    elements.hintButton.addEventListener('click', () => this.showHint());
     elements.autoPlayButton.addEventListener('click', () => this.runAutoPlay());
     elements.newGameButton.addEventListener('click', () => this.newGame());
     elements.restartButton.addEventListener('click', () => this.restart());
@@ -644,12 +871,13 @@ export class FreecellShell {
 
   async start(seed = 1): Promise<void> {
     this.isReady = false;
-    this.elements.status.textContent = 'Loading engine…';
+    this.elements.status.textContent = 'Loading engine...';
     this.elements.stageHost.dataset.engineReady = 'false';
     this.setControlsDisabled(true);
     await this.renderer.init();
     this.currentSeed = seed;
     this.snapshot = await this.engine.initialize(seed);
+    this.refreshLegalActions();
     this.startedAt = performance.now();
     if (this.timerHandle !== null) {
       window.clearInterval(this.timerHandle);
@@ -657,47 +885,126 @@ export class FreecellShell {
     this.timerHandle = window.setInterval(() => this.updateHud(), 1000);
     this.isReady = true;
     this.elements.status.textContent =
-      'Safe auto-play is enabled. Tap a card or run, then tap a destination.';
+      'Drag cards or runs onto a legal destination. Hint search and safe auto-play are live.';
     this.render();
   }
 
-  private handleCardTap(slot: SlotRef, row: number, cardId: number): void {
+  destroy(): void {
+    if (this.timerHandle !== null) {
+      window.clearInterval(this.timerHandle);
+    }
+    this.renderer.destroy();
+  }
+
+  private handleCardPress(slot: SlotRef, row: number, cardId: number, point: PointerPoint): void {
     if (!this.isReady) {
       return;
     }
 
     this.audio.unlock();
+    this.clearHintOverlay();
 
-    if (this.selection) {
-      if (this.sameSlot(this.selection.source, slot)) {
-        this.selection = this.buildSelection(slot, row, cardId) ?? null;
-        this.render();
-        return;
-      }
-
-      this.tryMove(slot, row, cardId);
+    const selection = this.buildSelection(slot, row, cardId);
+    if (!selection) {
+      this.render();
       return;
     }
 
-    this.selection = this.buildSelection(slot, row, cardId);
+    const anchorPose = this.renderer.getCardPose(cardId);
+    if (!anchorPose) {
+      return;
+    }
+
+    this.dragSession = {
+      selection,
+      anchorCardId: cardId,
+      startX: point.x,
+      startY: point.y,
+      pointerX: point.x,
+      pointerY: point.y,
+      offsetX: point.x - anchorPose.x,
+      offsetY: point.y - anchorPose.y,
+      dragDistance: 0,
+      pickupPlayed: false,
+      hoverSlot: null,
+      hoverLegal: false,
+    };
+
+    this.elements.status.textContent =
+      selection.count > 1
+        ? 'Drag the run to a legal column, free cell, or foundation.'
+        : 'Drag the card to a legal destination.';
     this.render();
   }
 
-  private handleSlotTap(slot: SlotRef): void {
-    if (!this.isReady) {
+  private handlePointerMove(point: PointerPoint): void {
+    if (!this.dragSession) {
       return;
     }
 
-    this.audio.unlock();
+    this.dragSession.pointerX = point.x;
+    this.dragSession.pointerY = point.y;
+    this.dragSession.dragDistance = Math.hypot(
+      point.x - this.dragSession.startX,
+      point.y - this.dragSession.startY,
+    );
 
-    if (!this.selection) {
+    if (this.dragSession.dragDistance >= DRAG_THRESHOLD && !this.dragSession.pickupPlayed) {
+      this.audio.playPickup();
+      this.dragSession.pickupPlayed = true;
+    }
+
+    if (this.dragSession.dragDistance < DRAG_THRESHOLD) {
+      this.dragSession.hoverSlot = null;
+      this.dragSession.hoverLegal = false;
+      this.render();
       return;
     }
 
-    this.tryMove(slot);
+    const hoverSlot = this.renderer.slotAtPoint(point.x, point.y);
+    const legal =
+      hoverSlot !== null &&
+      !sameSlot(hoverSlot, this.dragSession.selection.source) &&
+      this.isLegalMove(this.dragSession.selection, hoverSlot);
+
+    this.dragSession.hoverSlot =
+      hoverSlot && !sameSlot(hoverSlot, this.dragSession.selection.source) ? hoverSlot : null;
+    this.dragSession.hoverLegal = legal;
+    this.render();
   }
 
-  private buildSelection(slot: SlotRef, row: number, cardId: number): TableauSelection | null {
+  private handlePointerRelease(point: PointerPoint, canceled: boolean): void {
+    if (!this.dragSession) {
+      return;
+    }
+
+    const session = this.dragSession;
+    this.dragSession = null;
+
+    if (canceled || session.dragDistance < DRAG_THRESHOLD) {
+      this.elements.status.textContent =
+        'Drag a card or a movable run onto a highlighted destination to play.';
+      this.render();
+      return;
+    }
+
+    const destination =
+      session.hoverSlot && !sameSlot(session.hoverSlot, session.selection.source)
+        ? session.hoverSlot
+        : this.renderer.slotAtPoint(point.x, point.y);
+
+    if (!destination || sameSlot(destination, session.selection.source)) {
+      this.audio.playInvalid();
+      this.elements.status.textContent =
+        'That drop zone does not accept the current stack. Try a free cell, foundation, or legal column.';
+      this.render();
+      return;
+    }
+
+    this.tryMove(session.selection, destination);
+  }
+
+  private buildSelection(slot: SlotRef, row: number, cardId: number): DragSelection | null {
     if (slot.kind === 'tableau') {
       const column = this.snapshot.tableau[slot.index];
       if (!column) {
@@ -707,7 +1014,7 @@ export class FreecellShell {
       const firstMovableRow = column.cards.length - column.movableRunLength;
       if (row < firstMovableRow) {
         this.elements.status.textContent =
-          'Only the movable run at the end of a column can be selected.';
+          'Only the movable run at the end of a column can be dragged.';
         return null;
       }
 
@@ -716,16 +1023,13 @@ export class FreecellShell {
         source: slot,
         count: column.cards.length - row,
         cardIds: new Set(selectedCards),
+        anchorCardId: cardId,
       };
     }
 
     if (slot.kind === 'freecell') {
       const cell = this.snapshot.freecells[slot.index];
-      if (!cell) {
-        return null;
-      }
-
-      if (!cell.card || cell.card.id !== cardId) {
+      if (!cell?.card || cell.card.id !== cardId) {
         return null;
       }
 
@@ -733,15 +1037,12 @@ export class FreecellShell {
         source: slot,
         count: 1,
         cardIds: new Set([cardId]),
+        anchorCardId: cardId,
       };
     }
 
     const foundation = this.snapshot.foundations[slot.index];
-    if (!foundation) {
-      return null;
-    }
-
-    if (!foundation.topCard || foundation.topCard.id !== cardId) {
+    if (!foundation?.topCard || foundation.topCard.id !== cardId) {
       return null;
     }
 
@@ -749,63 +1050,91 @@ export class FreecellShell {
       source: slot,
       count: 1,
       cardIds: new Set([cardId]),
+      anchorCardId: cardId,
     };
   }
 
-  private tryMove(destination: SlotRef, row?: number, cardId?: number): void {
-    if (!this.selection) {
-      return;
-    }
-
+  private tryMove(selection: DragSelection, destination: SlotRef): void {
     const action: EngineAction = {
       actionIndex: null,
-      source: this.selection.source,
+      source: selection.source,
       destination,
-      count: this.selection.count,
+      count: selection.count,
     };
 
-    const result = this.engine.stepAction(action);
+    const result = this.engine.stepAction(action) as {
+      applied: boolean;
+      terminal: boolean;
+      turn: TurnRecord | null;
+      state: GameSnapshot;
+      illegalReason: string | null;
+    };
+
     if (!result.applied) {
-      if (row !== undefined && cardId !== undefined) {
-        this.selection = this.buildSelection(destination, row, cardId);
-      }
+      this.audio.playInvalid();
       this.elements.status.textContent = result.illegalReason ?? 'That move is not legal.';
       this.render();
       return;
     }
 
-    this.selection = null;
     this.snapshot = result.state;
+    this.refreshLegalActions();
     this.audio.playMove(result.turn, result.terminal);
     this.elements.status.textContent = result.terminal
       ? 'Game won. Replay export is ready from the live engine state.'
       : result.turn?.foundationDelta
-        ? 'Foundation progress.'
+        ? 'Foundation progress secured.'
         : 'Move applied.';
     this.render();
   }
 
   private undo(): void {
-    if (!this.isReady) {
+    if (!this.isReady || !this.engine.canUndo()) {
       return;
     }
 
     this.audio.unlock();
-    this.selection = null;
+    this.clearInteractions();
     this.snapshot = this.engine.undo();
+    this.refreshLegalActions();
     this.elements.status.textContent = 'Undid the last turn.';
     this.render();
   }
 
   private redo(): void {
+    if (!this.isReady || !this.engine.canRedo()) {
+      return;
+    }
+
+    this.audio.unlock();
+    this.clearInteractions();
+    this.snapshot = this.engine.redo();
+    this.refreshLegalActions();
+    this.elements.status.textContent = 'Replayed the next turn.';
+    this.render();
+  }
+
+  private showHint(): void {
     if (!this.isReady) {
       return;
     }
 
     this.audio.unlock();
-    this.selection = null;
-    this.snapshot = this.engine.redo();
-    this.elements.status.textContent = 'Replayed the next turn.';
+    this.dragSession = null;
+    const analysis = this.engine.hint();
+
+    if (analysis.suggested) {
+      this.hintOverlay = {
+        analysis,
+        cardIds: this.cardIdsForAction(analysis.suggested),
+        destination: analysis.suggested.destination,
+      };
+    } else {
+      this.hintOverlay = null;
+    }
+
+    this.audio.playHint();
+    this.elements.status.textContent = analysis.message;
     this.render();
   }
 
@@ -815,14 +1144,16 @@ export class FreecellShell {
     }
 
     this.audio.unlock();
+    this.clearInteractions();
     const turn = this.engine.runAutoPlay();
     if (!turn) {
       this.elements.status.textContent = 'No safe auto-play move is available right now.';
+      this.render();
       return;
     }
 
-    this.selection = null;
     this.snapshot = this.engine.getState();
+    this.refreshLegalActions();
     this.audio.playMove(turn, this.snapshot.status === 'won');
     this.elements.status.textContent = 'Auto-play sent safe cards to the foundations.';
     this.render();
@@ -837,11 +1168,14 @@ export class FreecellShell {
     const randomSeedBuffer = new Uint32Array(1);
     crypto.getRandomValues(randomSeedBuffer);
     const randomValue = (randomSeedBuffer[0] ?? 1) % 1_000_000_000;
+
     this.currentSeed = Math.max(1, randomValue);
+    this.clearInteractions();
     this.snapshot = this.engine.reset(this.currentSeed);
+    this.refreshLegalActions();
     this.startedAt = performance.now();
-    this.selection = null;
-    this.elements.status.textContent = 'New deal generated from a deterministic seed.';
+    this.audio.playShuffle();
+    this.elements.status.textContent = 'New deterministic deal generated from the current seed.';
     this.render();
   }
 
@@ -851,16 +1185,73 @@ export class FreecellShell {
     }
 
     this.audio.unlock();
+    this.clearInteractions();
     this.snapshot = this.engine.reset(this.currentSeed);
+    this.refreshLegalActions();
     this.startedAt = performance.now();
-    this.selection = null;
+    this.audio.playRestart();
     this.elements.status.textContent = 'Current seed restarted.';
     this.render();
   }
 
   private render(): void {
-    this.renderer.render(this.snapshot, this.selection);
+    if (!this.snapshot) {
+      return;
+    }
+
+    const overlay = this.buildBoardOverlay();
+    this.renderer.render(this.snapshot, overlay);
+    this.elements.stageHost.dataset.dragActive = this.dragSession ? 'true' : 'false';
+    this.elements.stageHost.dataset.hoverSlot = this.dragSession?.hoverSlot
+      ? slotKey(this.dragSession.hoverSlot)
+      : 'none';
+    this.elements.stageHost.dataset.hintKind = this.hintOverlay?.analysis.kind ?? 'none';
+    this.syncDebugState();
     this.updateHud();
+  }
+
+  private buildBoardOverlay(): BoardOverlay {
+    if (this.dragSession) {
+      return {
+        highlightedCardIds: this.dragSession.selection.cardIds,
+        slotEmphasis: this.dragSession.hoverSlot
+          ? {
+              slot: this.dragSession.hoverSlot,
+              tone: 'drag',
+              legal: this.dragSession.hoverLegal,
+            }
+          : null,
+        dragPreview: {
+          cardIds: this.dragSession.selection.cardIds,
+          anchorCardId: this.dragSession.anchorCardId,
+          x: this.dragSession.pointerX,
+          y: this.dragSession.pointerY,
+          offsetX: this.dragSession.offsetX,
+          offsetY: this.dragSession.offsetY,
+          engaged: this.dragSession.dragDistance >= DRAG_THRESHOLD,
+        },
+      };
+    }
+
+    if (this.hintOverlay) {
+      return {
+        highlightedCardIds: this.hintOverlay.cardIds,
+        slotEmphasis: this.hintOverlay.destination
+          ? {
+              slot: this.hintOverlay.destination,
+              tone: 'hint',
+              legal: true,
+            }
+          : null,
+        dragPreview: null,
+      };
+    }
+
+    return {
+      highlightedCardIds: new Set<number>(),
+      slotEmphasis: null,
+      dragPreview: null,
+    };
   }
 
   private updateHud(): void {
@@ -869,34 +1260,109 @@ export class FreecellShell {
     }
 
     const elapsedSeconds = Math.max(0, Math.floor((performance.now() - this.startedAt) / 1000));
+
     this.elements.moves.textContent = this.snapshot.moveCount.toString();
     this.elements.timer.textContent = formatDuration(elapsedSeconds);
     this.elements.seed.textContent = this.currentSeed.toString();
     this.elements.score.textContent = this.snapshot.score.toString();
     this.elements.undoButton.disabled = !this.isReady || !this.engine.canUndo();
     this.elements.redoButton.disabled = !this.isReady || !this.engine.canRedo();
+    this.elements.hintButton.disabled = !this.isReady || this.snapshot.status === 'won';
     this.elements.autoPlayButton.disabled = !this.isReady || this.snapshot.status === 'won';
     this.elements.restartButton.disabled = !this.isReady;
     this.elements.newGameButton.disabled = !this.isReady;
   }
 
-  private sameSlot(left: SlotRef, right: SlotRef): boolean {
-    return left.kind === right.kind && left.index === right.index;
+  private isLegalMove(selection: DragSelection, destination: SlotRef): boolean {
+    return this.legalActionKeys.has(
+      actionKey({
+        source: selection.source,
+        destination,
+        count: selection.count,
+      }),
+    );
   }
 
-  destroy(): void {
-    if (this.timerHandle !== null) {
-      window.clearInterval(this.timerHandle);
-    }
+  private refreshLegalActions(): void {
+    this.legalActionKeys = new Set(
+      this.engine.legalActions().map((action) =>
+        actionKey({
+          source: action.source,
+          destination: action.destination,
+          count: action.count,
+        }),
+      ),
+    );
+  }
+
+  private clearInteractions(): void {
+    this.dragSession = null;
+    this.clearHintOverlay();
+  }
+
+  private clearHintOverlay(): void {
+    this.hintOverlay = null;
   }
 
   private setControlsDisabled(disabled: boolean): void {
     this.elements.undoButton.disabled = disabled;
     this.elements.redoButton.disabled = disabled;
+    this.elements.hintButton.disabled = disabled;
     this.elements.autoPlayButton.disabled = disabled;
     this.elements.restartButton.disabled = disabled;
     this.elements.newGameButton.disabled = disabled;
   }
+
+  private syncDebugState(): void {
+    if (import.meta.env.PROD) {
+      return;
+    }
+
+    (
+      window as typeof window & {
+        __FREECELL_DEBUG__?: unknown;
+      }
+    ).__FREECELL_DEBUG__ = {
+      seed: this.currentSeed,
+      snapshot: this.snapshot,
+      overlay: {
+        dragActive: Boolean(this.dragSession),
+        hintKind: this.hintOverlay?.analysis.kind ?? 'none',
+      },
+      renderer: this.renderer.getDebugState(),
+    };
+  }
+
+  private cardIdsForAction(action: EngineAction): Set<number> {
+    if (action.source.kind === 'tableau') {
+      const column = this.snapshot.tableau[action.source.index];
+      if (!column) {
+        return new Set<number>();
+      }
+
+      return new Set(column.cards.slice(-action.count).map((card) => card.id));
+    }
+
+    if (action.source.kind === 'freecell') {
+      const card = this.snapshot.freecells[action.source.index]?.card;
+      return card ? new Set([card.id]) : new Set<number>();
+    }
+
+    const card = this.snapshot.foundations[action.source.index]?.topCard;
+    return card ? new Set([card.id]) : new Set<number>();
+  }
+}
+
+function slotKey(slot: SlotRef): string {
+  return `${slot.kind}:${slot.index}`;
+}
+
+function sameSlot(left: SlotRef, right: SlotRef): boolean {
+  return left.kind === right.kind && left.index === right.index;
+}
+
+function actionKey(action: Pick<EngineAction, 'source' | 'destination' | 'count'>): string {
+  return `${slotKey(action.source)}>${slotKey(action.destination)}#${action.count}`;
 }
 
 function formatDuration(totalSeconds: number): string {

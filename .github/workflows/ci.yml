@@ -41,8 +41,8 @@ jobs:
       - name: Install JavaScript dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install Playwright browser
-        run: pnpm --filter @freecell/e2e exec playwright install --with-deps chromium
+      - name: Install Playwright browsers
+        run: pnpm --filter @freecell/e2e exec playwright install --with-deps chromium webkit
 
       - name: Lint
         run: pnpm lint

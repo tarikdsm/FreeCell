@@ -6,7 +6,7 @@
 - Vite
 - PixiJS v8
 - Wasm binding from the Rust engine
-- Web Audio for lightweight move feedback
+- Web Audio with a structured cue bank and renderer-aware feedback
 
 ## Design Direction
 
@@ -34,6 +34,8 @@ The first UI aims for a modern table feel rather than a legacy DOM clone:
 - highlights
 - shadows
 - spring-like positional motion
+- drag previews for movable runs
+- hint-target emphasis
 
 ### Bridge Layer
 
@@ -41,6 +43,7 @@ The first UI aims for a modern table feel rather than a legacy DOM clone:
 
 - state reads
 - reset
+- solver-backed hint reads
 - structured action stepping
 - autoplay
 - undo/redo
@@ -48,35 +51,41 @@ The first UI aims for a modern table feel rather than a legacy DOM clone:
 
 ## Input Model
 
-The first functional client uses click-to-select:
+The current client uses direct drag-and-drop:
 
-1. select a movable card or tail run
-2. click a destination slot or card target
-3. engine validates and returns the authoritative next state
+1. press a movable card or tail run
+2. drag over a legal destination
+3. drop into a free cell, foundation, or tableau column
+4. let the Rust engine validate and return the authoritative next state
 
-This deliberately avoids copying legacy drag logic before the engine contract is locked.
+Hover feedback now distinguishes legal and illegal targets, and hint requests highlight both the source stack and the suggested destination.
 
 ## Audio
 
-The current `AudioDirector` is intentionally small but well-placed:
+`AudioDirector` is now organized as a cue bank rather than a single move tone:
 
 - resumes audio context on first user interaction
-- plays a light move tone
-- differentiates foundation progress
-- plays a short win chord
+- differentiates pickup, drop, invalid, hint, restart, shuffle, foundation, and win events
+- keeps the cue layer data-driven so authored assets can replace synthesis later
+- stays discrete enough for long sessions while still exposing premium feedback
 
-This is the seed of a larger asset-based sound architecture, not the final sound design.
+This is still not final sound design, but the architecture is now ready for richer authored assets without rewriting the interaction layer.
+
+## Renderer Fallbacks
+
+Safari and WebKit automation exposed an environment-specific GL crash path, so the board renderer now retries with Pixi's canvas renderer when GL initialization fails. That keeps the game playable in constrained WebKit environments without changing game logic or UI contracts.
 
 ## Responsive And Tablet Notes
 
-The first delivery already accounts for:
+The current delivery accounts for:
 
 - minimum board dimensions for narrow screens
 - touch-safe button sizing
 - canvas touch action control
 - deterministic layout recomputation from live host dimensions
+- WebKit-safe renderer fallback
 
-Automated E2E currently exercises both desktop and tablet-sized Chromium viewports. Dedicated WebKit automation remains future work.
+Automated E2E now exercises desktop and tablet viewports in both Chromium and WebKit.
 
 ## Current UX Surface
 
@@ -85,6 +94,7 @@ Automated E2E currently exercises both desktop and tablet-sized Chromium viewpor
 - timer
 - seed display
 - score display
+- hint
 - undo
 - redo
 - autoplay
@@ -93,8 +103,7 @@ Automated E2E currently exercises both desktop and tablet-sized Chromium viewpor
 
 ## Next Web Steps
 
-- direct drag-and-drop stacks
 - richer card art and texture pipeline
-- refined highlight and invalid-move feedback
-- improved accessibility affordances
+- authored audio assets and theme packs
+- refined accessibility affordances around drag interaction
 - animation presets for deal, win, and undo flows

@@ -11,19 +11,18 @@
 
 ## Phase 2: Immediate Next Work
 
-- drag-and-drop stack interaction
-- hint API backed by ordered legal actions
 - stronger regression seed corpus
-- richer audio and asset pipeline
-- WebKit E2E coverage
+- dedicated solver crate or deeper search package
+- richer authored audio and visual asset pipeline
+- saved sessions and game statistics
 
 ## Phase 3: Solver And AI Expansion
 
-- dedicated solver crate or service
 - tensor observation encoder
 - Gymnasium wrapper
 - batched rollout tooling
 - seed difficulty labeling and curriculum tooling
+- dedicated solver crate or service for exhaustive analysis and batch hints
 
 ## Phase 4: Product Polish
 

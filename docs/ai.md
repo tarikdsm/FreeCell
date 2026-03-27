@@ -14,6 +14,7 @@ The project is being prepared from day one for headless simulation and learning 
 - `get_state()`
 - `legal_actions()`
 - `legal_action_mask()`
+- `hint(options)`
 - `step(action)`
 - `is_terminal()`
 - `score_helper()`
@@ -28,6 +29,7 @@ The project is being prepared from day one for headless simulation and learning 
 - `get_state()`
 - `legal_actions()`
 - `legal_action_mask()`
+- `hint(max_depth=12, max_nodes=2500)`
 - `step(action_index)`
 - `is_terminal()`
 - `score_helper()`
@@ -83,6 +85,7 @@ Already supported:
 
 - deterministic reset by seed
 - stable snapshot serialization
+- solver-backed hint serialization
 - replay export
 - state-hash based regression validation
 

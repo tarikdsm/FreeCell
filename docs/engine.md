@@ -12,6 +12,7 @@
 - undo/redo history
 - replay export
 - autoplay policies
+- bounded hint search with principal variation output
 - stable JSON and compact binary serialization
 - headless stepping for AI workflows
 
@@ -124,6 +125,26 @@ The engine emits `GameSnapshot` with:
 
 Replay export is exposed as `ReplayExport`.
 
+## Hint Search
+
+The engine now exposes a solver-facing `HintAnalysis` surface with:
+
+- `kind`
+- `suggested`
+- `principalVariation`
+- `exploredNodes`
+- `solved`
+- `score`
+- `message`
+
+The current implementation uses bounded best-first search over legal turns:
+
+- safe autoplay is checked first for immediate foundation progress
+- forced single-move positions are surfaced directly
+- remaining positions are explored with heuristic ordering, state hashing, and depth/node limits
+
+This is intentionally pragmatic: it is strong enough to power real in-product hints today while still leaving room for a dedicated exhaustive solver crate later.
+
 ## Action Space
 
 The engine exposes two equivalent action surfaces:
@@ -152,11 +173,12 @@ The action mask has length `3120` and marks legal indices with `1`.
 - safe autoplay regression
 - replay export restoration
 - legal action mask validation
+- hint legality and winning-move detection
 - property test: undoing an arbitrary legal sequence returns to the initial hash
 
-## Current Solver Readiness
+## Solver Readiness
 
-The solver itself is not ported in this delivery, but the engine is already shaped for it:
+The engine is now past pure solver-readiness and already ships a bounded search layer. It still keeps the right seams for a deeper solver port:
 
 - deterministic seed reproduction
 - headless stepping
@@ -164,3 +186,4 @@ The solver itself is not ported in this delivery, but the engine is already shap
 - state hashing
 - replay export
 - autoplay hooks
+- serializable hint analysis

@@ -7,10 +7,11 @@ This repository starts from a clean slate: a deterministic Rust engine owns ever
 ## What Ships In The First Delivery
 
 - Rust engine with full FreeCell state, move validation, multi-move capacity checks, undo/redo, replay export, autoplay policies, and deterministic state hashes
+- bounded best-first hint search with principal variation output for solver-facing guidance
 - Microsoft-style seeded deal generation validated against the reference logic studied from legacy repositories
 - Wasm binding used by the real browser app
-- Python binding exposing `reset`, `get_state`, `legal_actions`, `legal_action_mask`, `step`, `is_terminal`, `score_helper`, and `export_replay`
-- PixiJS v8 web client with premium table shell, HUD, basic audio, and deterministic engine-backed play
+- Python binding exposing `reset`, `get_state`, `legal_actions`, `legal_action_mask`, `hint`, `step`, `is_terminal`, `score_helper`, and `export_replay`
+- PixiJS v8 web client with premium table shell, HUD, drag-and-drop stacks, hint overlays, organized audio cues, and deterministic engine-backed play
 - Playwright E2E coverage, Python smoke tests, property tests, and benchmark scaffolding
 - Research audit and architecture docs for immediate continuation
 
@@ -55,7 +56,7 @@ This repository starts from a clean slate: a deterministic Rust engine owns ever
 - `wasm32-unknown-unknown` target installed
 - `wasm-pack`
 - `maturin`
-- Playwright Chromium for local E2E runs
+- Playwright Chromium and WebKit for local E2E runs
 
 The repo includes small wrappers under `tools/scripts/` so root scripts can still find `cargo` and `wasm-pack` from `~/.cargo/bin` on machines where PATH is incomplete.
 
@@ -66,7 +67,7 @@ pnpm install
 rustup target add wasm32-unknown-unknown
 cargo install wasm-pack
 python -m pip install maturin pytest
-pnpm --filter @freecell/e2e exec playwright install chromium
+pnpm --filter @freecell/e2e exec playwright install chromium webkit
 pnpm dev
 ```
 
@@ -115,6 +116,6 @@ During the audit, the hard-coded sample strings in `tools/audits/repos/macroxue-
 
 ## Current Gaps
 
-- A full solver port is not in this first delivery, but the engine surface is already shaped for hints and solver integration.
-- The web client currently uses click-to-select interaction instead of the final drag stack UX.
-- Dedicated WebKit automation is still pending even though the layout and input model already target tablet use.
+- The hint system is now solver-backed, but it is still a bounded in-engine search rather than a dedicated exhaustive solver crate.
+- The audio pipeline is now organized and theme-ready, but it still uses synthesized cues instead of final authored assets.
+- Safari/WebKit automation is live, but long-run device coverage and manual hardware validation are still worth expanding.

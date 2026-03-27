@@ -33,6 +33,7 @@ The smoke suite verifies:
 - module install and import
 - state shape after reset
 - legal action mask alignment with serialized actions
+- hint surface serialization
 - stepping and replay export
 - invalid action rejection
 
@@ -42,10 +43,12 @@ Playwright currently verifies:
 
 - the engine-backed HUD loads
 - deterministic seed boot for the initial deal
+- hint requests surface a real engine-backed suggestion
+- drag-and-drop from tableau to freecell applies a real move
 - new game changes the seed
 - restart preserves the seed and resets move count
 - autoplay button produces deterministic status feedback
-- desktop and tablet-sized layouts both boot successfully
+- desktop and tablet-sized layouts boot successfully in Chromium and WebKit
 
 ## Benchmark Scope
 
@@ -59,6 +62,6 @@ See `tools/benchmarks/README.md`.
 
 ## Known Limits
 
-- no dedicated WebKit automation yet
-- no solver regression corpus yet
-- browser E2E focuses on HUD and engine integration, not final drag UX
+- the hint search does not yet have a large frozen regression corpus
+- browser automation validates the first premium drag flow, but not yet a wide catalog of stack interactions
+- Safari coverage is automated, but dedicated hardware runs are still recommended before release

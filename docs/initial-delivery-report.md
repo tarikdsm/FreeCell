@@ -4,11 +4,11 @@
 
 - professional monorepo bootstrap with Cargo and `pnpm` workspaces
 - Rust FreeCell engine with deterministic Microsoft-style deal generation
-- move validation, legal actions, autoplay, undo/redo, replay export, JSON and binary serialization
+- move validation, legal actions, solver-backed hints, autoplay, undo/redo, replay export, JSON and binary serialization
 - Wasm binding consumed by the real browser app
 - Python binding for AI and experiment workflows
-- PixiJS v8 browser UI with HUD, seed control, timer, score, and light audio
-- Playwright desktop and tablet E2E coverage
+- PixiJS v8 browser UI with HUD, seed control, timer, score, drag-and-drop, hint overlays, and organized audio cues
+- Playwright desktop and tablet E2E coverage in Chromium and WebKit
 - Python smoke tests and Criterion benchmark scaffolding
 - reference-repository audit and architecture documentation
 
@@ -25,12 +25,12 @@ The first delivery was validated locally with:
 
 - engine authority beats legacy code fidelity when they conflict
 - Microsoft-style deal compatibility follows executable reference logic, not conflicting sample text
-- solver code is deferred, but solver-facing APIs are already part of the engine shape
-- the first web client ships with click-to-select interaction so the engine contract can stabilize before drag UX lands
+- the current hint system uses bounded in-engine search now, while leaving room for a dedicated exhaustive solver later
+- the web client moved to drag-and-drop once the engine contract was stable enough to support premium interaction safely
+- Safari and WebKit stability is handled with an explicit Pixi canvas fallback when GL bootstrap fails
 
 ## Known Follow-Ups
 
-- port or integrate a real solver for hints
-- add production drag-and-drop stack movement
-- add WebKit automation and broader mobile validation
-- deepen the audio and asset pipeline
+- expand the hint system into a deeper solver crate or service
+- replace synthesized audio with final authored assets
+- broaden seed regression corpora and manual device validation
